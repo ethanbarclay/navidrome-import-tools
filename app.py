@@ -946,13 +946,14 @@ def health_check():
 if __name__ == "__main__":
     # Check if we're in production environment
     is_production = os.getenv("FLASK_ENV") == "production"
+    port = int(os.getenv("PORT", "8888"))
 
     if is_production:
         # Production mode - use allow_unsafe_werkzeug for simplicity
         # In a real production environment, you'd want to use gunicorn or similar
         socketio.run(
-            app, debug=False, host="0.0.0.0", port=8888, allow_unsafe_werkzeug=True
+            app, debug=False, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True
         )
     else:
         # Development mode
-        socketio.run(app, debug=True, host="0.0.0.0", port=8888)
+        socketio.run(app, debug=True, host="0.0.0.0", port=port)
