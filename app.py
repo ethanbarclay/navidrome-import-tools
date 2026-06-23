@@ -27,6 +27,8 @@ from spotipy.oauth2 import SpotifyOAuth
 # Add scripts directory to path to import existing scripts
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
 
+from spotify_client import flatten_track_item  # noqa: E402
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -374,31 +376,10 @@ def fetch_playlist():
                     break
 
                 for item in items:
-                    track = item.get("item") or item.get("track")
-                    if track is None:
+                    flat = flatten_track_item(item)
+                    if flat is None:
                         continue
-                    if track.get("type") != "track":
-                        continue
-                    if not track.get("artists") or not track.get("album"):
-                        continue
-                    tracks.append(
-                        {
-                            "track_id": track["id"],
-                            "track_name": track["name"],
-                            "artist_name": ", ".join(
-                                [artist["name"] for artist in track["artists"]]
-                            ),
-                            "artist_id": ", ".join(
-                                [artist["id"] for artist in track["artists"]]
-                            ),
-                            "album_name": track["album"]["name"],
-                            "album_id": track["album"]["id"],
-                            "added_at": item.get("added_at", ""),
-                            "track_uri": track["uri"],
-                            "popularity": track.get("popularity", ""),
-                            "duration_ms": track.get("duration_ms", ""),
-                        }
-                    )
+                    tracks.append(flat)
 
                 offset += len(items)
                 progress = min(
@@ -478,27 +459,10 @@ def fetch_liked_songs():
                     break
 
                 for item in items:
-                    track = item.get("track")
-                    if track is None:
+                    flat = flatten_track_item(item)
+                    if flat is None:
                         continue
-                    tracks.append(
-                        {
-                            "track_id": track["id"],
-                            "track_name": track["name"],
-                            "artist_name": ", ".join(
-                                [artist["name"] for artist in track["artists"]]
-                            ),
-                            "artist_id": ", ".join(
-                                [artist["id"] for artist in track["artists"]]
-                            ),
-                            "album_name": track["album"]["name"],
-                            "album_id": track["album"]["id"],
-                            "added_at": item.get("added_at", ""),
-                            "track_uri": track["uri"],
-                            "popularity": track.get("popularity", ""),
-                            "duration_ms": track.get("duration_ms", ""),
-                        }
-                    )
+                    tracks.append(flat)
 
                 offset += len(items)
                 # Calculate accurate progress: 5% for initial setup, 90% for fetching, 5% for saving

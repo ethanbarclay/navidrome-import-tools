@@ -43,6 +43,34 @@ def extract_playlist_id(input_str):
     return input_str.strip()
 
 
+def flatten_track_item(item):
+    """Flatten a playlist or library item into our track dict, or None to skip.
+
+    Handles both the new ``item`` key and the deprecated ``track`` key returned
+    by Spotify's playlist endpoints, skips podcast episodes, and skips entries
+    missing required artist/album metadata.
+    """
+    track = item.get("item") or item.get("track")
+    if track is None:
+        return None
+    if track.get("type") != "track":
+        return None
+    if not track.get("artists") or not track.get("album"):
+        return None
+    return {
+        "track_id": track["id"],
+        "track_name": track["name"],
+        "artist_name": ", ".join(artist["name"] for artist in track["artists"]),
+        "artist_id": ", ".join(artist["id"] for artist in track["artists"]),
+        "album_name": track["album"]["name"],
+        "album_id": track["album"]["id"],
+        "added_at": item.get("added_at", ""),
+        "track_uri": track["uri"],
+        "popularity": track.get("popularity", ""),
+        "duration_ms": track.get("duration_ms", ""),
+    }
+
+
 def fetch_playlist_tracks(sp, playlist_id):
     """Fetch all tracks from a Spotify playlist with pagination.
 
@@ -63,27 +91,10 @@ def fetch_playlist_tracks(sp, playlist_id):
         if not items:
             break
         for item in items:
-            track = item.get("track")
-            if track is None:
+            flat = flatten_track_item(item)
+            if flat is None:
                 continue
-            tracks.append(
-                {
-                    "track_id": track["id"],
-                    "track_name": track["name"],
-                    "artist_name": ", ".join(
-                        [artist["name"] for artist in track["artists"]]
-                    ),
-                    "artist_id": ", ".join(
-                        [artist["id"] for artist in track["artists"]]
-                    ),
-                    "album_name": track["album"]["name"],
-                    "album_id": track["album"]["id"],
-                    "added_at": item.get("added_at", ""),
-                    "track_uri": track["uri"],
-                    "popularity": track.get("popularity", ""),
-                    "duration_ms": track.get("duration_ms", ""),
-                }
-            )
+            tracks.append(flat)
         offset += len(items)
         if offset % 200 == 0:
             print(f"Fetched {offset} playlist songs so far...")
