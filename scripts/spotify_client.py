@@ -63,7 +63,7 @@ def fetch_playlist_tracks(sp, playlist_id):
         if not items:
             break
         for item in items:
-            track = item["track"]
+            track = item.get("track")
             if track is None:
                 continue
             tracks.append(

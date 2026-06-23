@@ -365,6 +365,7 @@ def fetch_playlist():
             tracks = []
             limit = 100
             offset = 0
+            total = playlist.get("tracks", {}).get("total", 1) or 1
 
             while True:
                 results = sp.playlist_items(playlist_id, limit=limit, offset=offset)
@@ -373,8 +374,12 @@ def fetch_playlist():
                     break
 
                 for item in items:
-                    track = item["track"]
+                    track = item.get("item") or item.get("track")
                     if track is None:
+                        continue
+                    if track.get("type") != "track":
+                        continue
+                    if not track.get("artists") or not track.get("album"):
                         continue
                     tracks.append(
                         {
@@ -397,7 +402,7 @@ def fetch_playlist():
 
                 offset += len(items)
                 progress = min(
-                    90, int((offset / playlist["tracks"]["total"]) * 80) + 10
+                    90, int((offset / total) * 80) + 10
                 )
                 socketio.emit(
                     "progress",
@@ -473,7 +478,7 @@ def fetch_liked_songs():
                     break
 
                 for item in items:
-                    track = item["track"]
+                    track = item.get("track")
                     if track is None:
                         continue
                     tracks.append(

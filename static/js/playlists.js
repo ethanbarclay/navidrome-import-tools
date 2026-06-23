@@ -158,7 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="flex-grow-1 ms-3">
                         <h6 class="mb-1">${window.spotifyApp.escapeHtml(playlist.name)}</h6>
-                        <small class="text-muted">${playlist.tracks.total} tracks</small>
+                        <small class="text-muted">${playlist.tracks?.total ?? '?'} tracks</small>
                     </div>
                 </div>
             </div>

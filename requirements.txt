@@ -1,5 +1,5 @@
 Flask==2.3.3
 Flask-SocketIO==5.3.6
-spotipy==2.23.0
+spotipy==2.26.0
 python-dotenv==1.0.0
 requests==2.31.0

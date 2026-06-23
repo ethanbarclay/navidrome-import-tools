@@ -1,5 +1,5 @@
 # Multi-stage build for optimization
-FROM python:3.11-slim as base
+FROM python:3.11-slim AS base
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -13,13 +13,13 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 # Set up working directory
 WORKDIR /app
 
-FROM base as dependencies
+FROM base AS dependencies
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-FROM dependencies as final
+FROM dependencies AS final
 
 # Copy application code
 COPY . .
