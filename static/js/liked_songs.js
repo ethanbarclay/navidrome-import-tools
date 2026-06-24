@@ -9,11 +9,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmSplitFinalBtn = document.getElementById('confirm-split-final');
     const splitSettingsDiv = document.getElementById('split-settings');
 
+    // Load the total liked-songs count on page mount
+    loadLikedSongsCount();
+
     // Handle fetch liked songs
     if (fetchLikedBtn) {
         fetchLikedBtn.addEventListener('click', async () => {
             await fetchLikedSongs();
         });
+    }
+
+    async function loadLikedSongsCount() {
+        const countDisplay = document.getElementById('liked-count-display');
+        const countValue = document.getElementById('liked-count-value');
+        if (!countDisplay || !countValue) return;
+
+        try {
+            const response = await window.spotifyApp.makeRequest('/api/liked-songs-count');
+            if (typeof response.total === 'number') {
+                countValue.textContent = response.total.toLocaleString();
+            } else {
+                countDisplay.style.display = 'none';
+            }
+        } catch (error) {
+            countDisplay.style.display = 'none';
+        }
     }
 
     // Handle JSON download

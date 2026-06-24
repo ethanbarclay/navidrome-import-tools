@@ -22,10 +22,16 @@ from flask import (
     url_for,
 )
 from flask_socketio import SocketIO, emit
+from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
 # Add scripts directory to path to import existing scripts
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+
+from spotify_client import (  # noqa: E402
+    fetch_playlist_via_embed,
+    flatten_track_item,
+)
 
 load_dotenv()
 
@@ -329,6 +335,19 @@ def get_user_playlists():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/liked-songs-count")
+def get_liked_songs_count():
+    sp = get_spotify_client()
+    if not sp:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    try:
+        results = sp.current_user_saved_tracks(limit=1, offset=0)
+        return jsonify({"total": results.get("total", 0)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/fetch-playlist", methods=["POST"])
 def fetch_playlist():
     sp = get_spotify_client()
@@ -351,63 +370,80 @@ def fetch_playlist():
                 "progress", {"message": "Starting playlist fetch...", "progress": 0}
             )
 
-            # Get playlist info
-            playlist = sp.playlist(playlist_id)
-            socketio.emit(
-                "progress",
-                {
-                    "message": f'Fetching tracks from "{playlist["name"]}"...',
-                    "progress": 10,
-                },
-            )
+            # Get playlist info, falling back to the embed page for
+            # Spotify-owned algorithmic/editorial playlists (Daily Mix,
+            # Discover Weekly, etc.) which the Web API returns 404 for.
+            try:
+                playlist = sp.playlist(playlist_id)
+            except SpotifyException as e:
+                if e.http_status != 404:
+                    raise
+                playlist = None
 
-            # Fetch all tracks
-            tracks = []
-            limit = 100
-            offset = 0
-            total = playlist.get("tracks", {}).get("total", 1) or 1
-
-            while True:
-                results = sp.playlist_items(playlist_id, limit=limit, offset=offset)
-                items = results["items"]
-                if not items:
-                    break
-
-                for item in items:
-                    track = item.get("item") or item.get("track")
-                    if track is None:
-                        continue
-                    if track.get("type") != "track":
-                        continue
-                    if not track.get("artists") or not track.get("album"):
-                        continue
-                    tracks.append(
+            if playlist is None:
+                playlist_name, tracks = fetch_playlist_via_embed(
+                    sp,
+                    playlist_id,
+                    on_name=lambda name: socketio.emit(
+                        "progress",
                         {
-                            "track_id": track["id"],
-                            "track_name": track["name"],
-                            "artist_name": ", ".join(
-                                [artist["name"] for artist in track["artists"]]
+                            "message": f'Fetching tracks from "{name}"...',
+                            "progress": 10,
+                        },
+                    ),
+                    on_progress=lambda count, total: socketio.emit(
+                        "progress",
+                        {
+                            "message": f"Fetched {count} tracks...",
+                            "progress": (
+                                min(90, int((count / total) * 80) + 10)
+                                if total
+                                else 90
                             ),
-                            "artist_id": ", ".join(
-                                [artist["id"] for artist in track["artists"]]
-                            ),
-                            "album_name": track["album"]["name"],
-                            "album_id": track["album"]["id"],
-                            "added_at": item.get("added_at", ""),
-                            "track_uri": track["uri"],
-                            "popularity": track.get("popularity", ""),
-                            "duration_ms": track.get("duration_ms", ""),
-                        }
-                    )
-
-                offset += len(items)
-                progress = min(
-                    90, int((offset / total) * 80) + 10
+                        },
+                    ),
                 )
+            else:
+                playlist_name = playlist["name"]
                 socketio.emit(
                     "progress",
-                    {"message": f"Fetched {offset} tracks...", "progress": progress},
+                    {
+                        "message": f'Fetching tracks from "{playlist_name}"...',
+                        "progress": 10,
+                    },
                 )
+
+                # Fetch all tracks
+                tracks = []
+                limit = 100
+                offset = 0
+                total = playlist.get("tracks", {}).get("total", 1) or 1
+
+                while True:
+                    results = sp.playlist_items(
+                        playlist_id, limit=limit, offset=offset
+                    )
+                    items = results["items"]
+                    if not items:
+                        break
+
+                    for item in items:
+                        flat = flatten_track_item(item)
+                        if flat is None:
+                            continue
+                        tracks.append(flat)
+
+                    offset += len(items)
+                    progress = min(
+                        90, int((offset / total) * 80) + 10
+                    )
+                    socketio.emit(
+                        "progress",
+                        {
+                            "message": f"Fetched {offset} tracks...",
+                            "progress": progress,
+                        },
+                    )
 
             # Save to temporary file
             temp_file = tempfile.NamedTemporaryFile(
@@ -426,7 +462,7 @@ def fetch_playlist():
             socketio.emit(
                 "playlist_fetched",
                 {
-                    "playlist_name": playlist["name"],
+                    "playlist_name": playlist_name,
                     "track_count": len(tracks),
                     "temp_file": temp_file.name,
                     "tracks": tracks,  # Send all tracks for pagination
@@ -478,27 +514,10 @@ def fetch_liked_songs():
                     break
 
                 for item in items:
-                    track = item.get("track")
-                    if track is None:
+                    flat = flatten_track_item(item)
+                    if flat is None:
                         continue
-                    tracks.append(
-                        {
-                            "track_id": track["id"],
-                            "track_name": track["name"],
-                            "artist_name": ", ".join(
-                                [artist["name"] for artist in track["artists"]]
-                            ),
-                            "artist_id": ", ".join(
-                                [artist["id"] for artist in track["artists"]]
-                            ),
-                            "album_name": track["album"]["name"],
-                            "album_id": track["album"]["id"],
-                            "added_at": item.get("added_at", ""),
-                            "track_uri": track["uri"],
-                            "popularity": track.get("popularity", ""),
-                            "duration_ms": track.get("duration_ms", ""),
-                        }
-                    )
+                    tracks.append(flat)
 
                 offset += len(items)
                 # Calculate accurate progress: 5% for initial setup, 90% for fetching, 5% for saving
@@ -982,13 +1001,20 @@ def health_check():
 if __name__ == "__main__":
     # Check if we're in production environment
     is_production = os.getenv("FLASK_ENV") == "production"
+    try:
+        port = int(os.getenv("PORT", "8888"))
+    except ValueError:
+        print(
+            f"Invalid PORT value {os.getenv('PORT')!r}; falling back to 8888."
+        )
+        port = 8888
 
     if is_production:
         # Production mode - use allow_unsafe_werkzeug for simplicity
         # In a real production environment, you'd want to use gunicorn or similar
         socketio.run(
-            app, debug=False, host="0.0.0.0", port=8888, allow_unsafe_werkzeug=True
+            app, debug=False, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True
         )
     else:
         # Development mode
-        socketio.run(app, debug=True, host="0.0.0.0", port=8888)
+        socketio.run(app, debug=True, host="0.0.0.0", port=port)

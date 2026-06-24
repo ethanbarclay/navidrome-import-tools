@@ -5,6 +5,8 @@ import json
 import os
 from dotenv import load_dotenv
 
+from spotify_client import flatten_track_item
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -32,21 +34,10 @@ while True:
     if not items:
         break
     for item in items:
-        track = item['track']
-        if track is None:  # skip removed tracks
+        flat = flatten_track_item(item)
+        if flat is None:
             continue
-        liked_tracks.append({
-            'track_id': track['id'],
-            'track_name': track['name'],
-            'artist_name': ', '.join([artist['name'] for artist in track['artists']]),
-            'artist_id': ', '.join([artist['id'] for artist in track['artists']]),
-            'album_name': track['album']['name'],
-            'album_id': track['album']['id'],
-            'added_at': item.get('added_at', ''),
-            'track_uri': track['uri'],
-            'popularity': track.get('popularity', ''),
-            'duration_ms': track.get('duration_ms', '')
-        })
+        liked_tracks.append(flat)
     offset += len(items)
     print(f"Fetched {offset} liked songs so far...")
 
