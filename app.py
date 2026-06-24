@@ -22,12 +22,16 @@ from flask import (
     url_for,
 )
 from flask_socketio import SocketIO, emit
+from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
 # Add scripts directory to path to import existing scripts
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
 
-from spotify_client import flatten_track_item  # noqa: E402
+from spotify_client import (  # noqa: E402
+    fetch_playlist_via_embed,
+    flatten_track_item,
+)
 
 load_dotenv()
 
@@ -366,42 +370,73 @@ def fetch_playlist():
                 "progress", {"message": "Starting playlist fetch...", "progress": 0}
             )
 
-            # Get playlist info
-            playlist = sp.playlist(playlist_id)
-            socketio.emit(
-                "progress",
-                {
-                    "message": f'Fetching tracks from "{playlist["name"]}"...',
-                    "progress": 10,
-                },
-            )
+            # Get playlist info, falling back to the embed page for
+            # Spotify-owned algorithmic/editorial playlists (Daily Mix,
+            # Discover Weekly, etc.) which the Web API returns 404 for.
+            try:
+                playlist = sp.playlist(playlist_id)
+            except SpotifyException as e:
+                if e.http_status != 404:
+                    raise
+                playlist = None
 
-            # Fetch all tracks
-            tracks = []
-            limit = 100
-            offset = 0
-            total = playlist.get("tracks", {}).get("total", 1) or 1
-
-            while True:
-                results = sp.playlist_items(playlist_id, limit=limit, offset=offset)
-                items = results["items"]
-                if not items:
-                    break
-
-                for item in items:
-                    flat = flatten_track_item(item)
-                    if flat is None:
-                        continue
-                    tracks.append(flat)
-
-                offset += len(items)
-                progress = min(
-                    90, int((offset / total) * 80) + 10
+            if playlist is None:
+                playlist_name, tracks = fetch_playlist_via_embed(
+                    sp,
+                    playlist_id,
+                    on_name=lambda name: socketio.emit(
+                        "progress",
+                        {
+                            "message": f'Fetching tracks from "{name}"...',
+                            "progress": 10,
+                        },
+                    ),
+                    on_progress=lambda count: socketio.emit(
+                        "progress",
+                        {"message": f"Fetched {count} tracks...", "progress": 50},
+                    ),
                 )
+            else:
+                playlist_name = playlist["name"]
                 socketio.emit(
                     "progress",
-                    {"message": f"Fetched {offset} tracks...", "progress": progress},
+                    {
+                        "message": f'Fetching tracks from "{playlist_name}"...',
+                        "progress": 10,
+                    },
                 )
+
+                # Fetch all tracks
+                tracks = []
+                limit = 100
+                offset = 0
+                total = playlist.get("tracks", {}).get("total", 1) or 1
+
+                while True:
+                    results = sp.playlist_items(
+                        playlist_id, limit=limit, offset=offset
+                    )
+                    items = results["items"]
+                    if not items:
+                        break
+
+                    for item in items:
+                        flat = flatten_track_item(item)
+                        if flat is None:
+                            continue
+                        tracks.append(flat)
+
+                    offset += len(items)
+                    progress = min(
+                        90, int((offset / total) * 80) + 10
+                    )
+                    socketio.emit(
+                        "progress",
+                        {
+                            "message": f"Fetched {offset} tracks...",
+                            "progress": progress,
+                        },
+                    )
 
             # Save to temporary file
             temp_file = tempfile.NamedTemporaryFile(
@@ -420,7 +455,7 @@ def fetch_playlist():
             socketio.emit(
                 "playlist_fetched",
                 {
-                    "playlist_name": playlist["name"],
+                    "playlist_name": playlist_name,
                     "track_count": len(tracks),
                     "temp_file": temp_file.name,
                     "tracks": tracks,  # Send all tracks for pagination
