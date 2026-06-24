@@ -391,9 +391,16 @@ def fetch_playlist():
                             "progress": 10,
                         },
                     ),
-                    on_progress=lambda count: socketio.emit(
+                    on_progress=lambda count, total: socketio.emit(
                         "progress",
-                        {"message": f"Fetched {count} tracks...", "progress": 50},
+                        {
+                            "message": f"Fetched {count} tracks...",
+                            "progress": (
+                                min(90, int((count / total) * 80) + 10)
+                                if total
+                                else 90
+                            ),
+                        },
                     ),
                 )
             else:
@@ -994,7 +1001,13 @@ def health_check():
 if __name__ == "__main__":
     # Check if we're in production environment
     is_production = os.getenv("FLASK_ENV") == "production"
-    port = int(os.getenv("PORT", "8888"))
+    try:
+        port = int(os.getenv("PORT", "8888"))
+    except ValueError:
+        print(
+            f"Invalid PORT value {os.getenv('PORT')!r}; falling back to 8888."
+        )
+        port = 8888
 
     if is_production:
         # Production mode - use allow_unsafe_werkzeug for simplicity

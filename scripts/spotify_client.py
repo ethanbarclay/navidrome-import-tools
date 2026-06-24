@@ -88,17 +88,29 @@ def fetch_embed_entity(playlist_id):
 
     Used as a fallback for Spotify-owned algorithmic/editorial playlists that
     the Web API blocks with a 404. Raises RuntimeError if the page can't be
-    parsed.
+    fetched or parsed.
     """
-    resp = requests.get(
-        EMBED_URL.format(playlist_id), headers=_EMBED_HEADERS, timeout=15
-    )
-    resp.raise_for_status()
+    try:
+        resp = requests.get(
+            EMBED_URL.format(playlist_id), headers=_EMBED_HEADERS, timeout=15
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        # Keep error reporting predictable for this undocumented fallback path
+        # instead of leaking raw requests exceptions (404/429/network/etc.).
+        raise RuntimeError(f"Could not fetch Spotify embed page: {e}") from e
     match = _NEXT_DATA_RE.search(resp.text)
     if not match:
         raise RuntimeError("Could not parse Spotify embed page (no __NEXT_DATA__).")
-    data = json.loads(match.group(1))
-    return data["props"]["pageProps"]["state"]["data"]["entity"]
+    try:
+        data = json.loads(match.group(1))
+        return data["props"]["pageProps"]["state"]["data"]["entity"]
+    except (ValueError, KeyError, TypeError) as e:
+        # The embed page is undocumented; its JSON shape can change without
+        # notice. Surface a consistent error instead of a confusing traceback.
+        raise RuntimeError(
+            f"Could not parse Spotify embed page (unexpected structure): {e}"
+        ) from e
 
 
 def fetch_playlist_via_embed(sp, playlist_id, on_name=None, on_progress=None):
@@ -111,7 +123,8 @@ def fetch_playlist_via_embed(sp, playlist_id, on_name=None, on_progress=None):
     Args:
         on_name: optional callable(playlist_name), invoked once the name is
             known (before enrichment).
-        on_progress: optional callable(track_count), invoked after each batch.
+        on_progress: optional callable(track_count, total), invoked after each
+            batch so callers can render a progress bar.
 
     Returns:
         tuple: (playlist_name, tracks_list)
@@ -138,7 +151,7 @@ def fetch_playlist_via_embed(sp, playlist_id, on_name=None, on_progress=None):
             if flat is not None:
                 tracks.append(flat)
         if on_progress:
-            on_progress(len(tracks))
+            on_progress(len(tracks), len(track_ids))
 
     return playlist_name, tracks
 
@@ -157,8 +170,8 @@ def fetch_playlist_tracks(sp, playlist_id):
     except SpotifyException as e:
         if e.http_status == 404:
             print(
-                "Playlist not available via Web API (likely a Spotify-generated "
-                "playlist); using embed fallback..."
+                "Playlist not available via Web API (e.g. a Spotify-generated "
+                "playlist, or a private/invalid ID); trying embed fallback..."
             )
             name, tracks = fetch_playlist_via_embed(sp, playlist_id)
             print(f"Fetched {len(tracks)} playlist songs.")
