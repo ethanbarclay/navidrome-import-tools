@@ -331,6 +331,19 @@ def get_user_playlists():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/liked-songs-count")
+def get_liked_songs_count():
+    sp = get_spotify_client()
+    if not sp:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    try:
+        results = sp.current_user_saved_tracks(limit=1, offset=0)
+        return jsonify({"total": results.get("total", 0)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/fetch-playlist", methods=["POST"])
 def fetch_playlist():
     sp = get_spotify_client()
