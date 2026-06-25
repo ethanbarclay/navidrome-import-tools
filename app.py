@@ -22,6 +22,7 @@ from flask import (
     url_for,
 )
 from flask_socketio import SocketIO, emit
+from spotipy.cache_handler import FlaskSessionCacheHandler
 from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
@@ -107,11 +108,16 @@ def save_settings(settings):
 
 
 def get_spotify_oauth():
+    # Cache the token per-user in the Flask session instead of spotipy's
+    # default shared on-disk .cache file. The shared file caused every login
+    # to return the first user's token (get_access_token honours the cache),
+    # so multiple LAN users all saw the original user's account.
     return SpotifyOAuth(
         client_id=SPOTIFY_CLIENT_ID,
         client_secret=SPOTIFY_CLIENT_SECRET,
         redirect_uri=SPOTIFY_REDIRECT_URI,
         scope="playlist-read-private playlist-read-collaborative user-library-read playlist-modify-private playlist-modify-public",
+        cache_handler=FlaskSessionCacheHandler(session),
     )
 
 
@@ -177,8 +183,11 @@ def get_spotify_client():
     sp_oauth = get_spotify_oauth()
     if sp_oauth.is_token_expired(token_info):
         try:
+            # refresh_access_token also writes the new token back to the session
+            # via the cache handler. A static-token client (rather than passing
+            # the auth_manager) is intentional: the client is used from the
+            # background worker threads, which have no Flask request context.
             token_info = sp_oauth.refresh_access_token(token_info["refresh_token"])
-            session["token_info"] = token_info
         except Exception:
             # Token refresh failed, clear session
             session.clear()
