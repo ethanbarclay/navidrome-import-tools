@@ -39,8 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle JSON download
     if (downloadJsonBtn) {
         downloadJsonBtn.addEventListener('click', async () => {
-            if (!window.spotifyApp.currentTempFile) {
-                window.spotifyApp.showError('Please fetch your liked songs first');
+            if (!window.spotifyApp.requireTempFile('Please fetch your liked songs first')) {
                 return;
             }
 
@@ -51,8 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle M3U generation
     if (generateM3UBtn) {
         generateM3UBtn.addEventListener('click', async () => {
-            if (!window.spotifyApp.currentTempFile) {
-                window.spotifyApp.showError('Please fetch your liked songs first');
+            if (!window.spotifyApp.requireTempFile('Please fetch your liked songs first')) {
                 return;
             }
 
@@ -63,8 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle Lidarr submission
     if (sendToLidarrBtn) {
         sendToLidarrBtn.addEventListener('click', async () => {
-            if (!window.spotifyApp.currentTempFile) {
-                window.spotifyApp.showError('Please fetch your liked songs first');
+            if (!window.spotifyApp.requireTempFile('Please fetch your liked songs first')) {
                 return;
             }
 
@@ -75,8 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle split playlists button
     if (splitPlaylistsBtn) {
         splitPlaylistsBtn.addEventListener('click', () => {
-            if (!window.spotifyApp.currentTempFile) {
-                window.spotifyApp.showError('Please fetch your liked songs first');
+            if (!window.spotifyApp.requireTempFile('Please fetch your liked songs first')) {
                 return;
             }
 
@@ -102,59 +98,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Fetch liked songs
+    // Fetch liked songs (progress and results arrive via socket events)
     async function fetchLikedSongs() {
-        try {
-            window.spotifyApp.showProgress('Fetching Liked Songs');
-            
-            const response = await window.spotifyApp.makeRequest('/api/fetch-liked-songs', {
-                method: 'POST'
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to fetch liked songs: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/fetch-liked-songs', {
+            title: 'Fetching Liked Songs',
+            errorLabel: 'fetch liked songs'
+        });
     }
 
     // Generate M3U playlist
     async function generateM3U() {
-        try {
-            window.spotifyApp.showProgress('Generating M3U');
-            
-            const response = await window.spotifyApp.makeRequest('/api/generate-m3u', {
-                method: 'POST',
-                body: JSON.stringify({
-                    temp_file: window.spotifyApp.currentTempFile,
-                    playlist_name: 'liked_songs'
-                })
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to generate M3U: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/generate-m3u', {
+            title: 'Generating M3U',
+            body: {
+                temp_file: window.spotifyApp.currentTempFile,
+                playlist_name: 'liked_songs'
+            },
+            errorLabel: 'generate M3U'
+        });
     }
 
     // Send to Lidarr
     async function sendToLidarr() {
-        try {
-            window.spotifyApp.showProgress('Sending to Lidarr');
-            
-            const response = await window.spotifyApp.makeRequest('/api/send-to-lidarr', {
-                method: 'POST',
-                body: JSON.stringify({
-                    temp_file: window.spotifyApp.currentTempFile
-                })
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to send to Lidarr: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/send-to-lidarr', {
+            title: 'Sending to Lidarr',
+            body: { temp_file: window.spotifyApp.currentTempFile },
+            errorLabel: 'send to Lidarr'
+        });
     }
 
     // Show split confirmation modal
@@ -192,23 +162,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const playlistSize = parseInt(document.getElementById('playlist-size').value);
         const playlistPrefix = document.getElementById('playlist-prefix').value.trim();
 
-        try {
-            window.spotifyApp.showProgress('Splitting Liked Songs');
-            
-            const response = await window.spotifyApp.makeRequest('/api/split-liked-songs', {
-                method: 'POST',
-                body: JSON.stringify({
-                    temp_file: window.spotifyApp.currentTempFile,
-                    playlist_size: playlistSize,
-                    playlist_prefix: playlistPrefix
-                })
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to split liked songs: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/split-liked-songs', {
+            title: 'Splitting Liked Songs',
+            body: {
+                temp_file: window.spotifyApp.currentTempFile,
+                playlist_size: playlistSize,
+                playlist_prefix: playlistPrefix
+            },
+            errorLabel: 'split liked songs'
+        });
     }
 
     // Download full JSON data

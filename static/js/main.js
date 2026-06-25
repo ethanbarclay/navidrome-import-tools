@@ -177,6 +177,30 @@ class SpotifyMigrationApp {
         }
     }
 
+    // Guard an action on a previously-fetched temp file; shows an error if missing.
+    requireTempFile(message = 'Please fetch data first') {
+        if (!this.currentTempFile) {
+            this.showError(message);
+            return false;
+        }
+        return true;
+    }
+
+    // Run a backend action: open the progress modal, POST, and surface errors.
+    // Progress and completion are delivered asynchronously via socket events.
+    async runAction(url, { title = 'Processing...', body = null, errorLabel = 'complete action' } = {}) {
+        try {
+            this.showProgress(title);
+            const options = { method: 'POST' };
+            if (body) options.body = JSON.stringify(body);
+            return await this.makeRequest(url, options);
+        } catch (error) {
+            this.hideProgress();
+            this.showError(`Failed to ${errorLabel}: ${error.message}`);
+            return null;
+        }
+    }
+
     // Playlist handling
     handlePlaylistFetched(data) {
         this.currentTempFile = data.temp_file;
