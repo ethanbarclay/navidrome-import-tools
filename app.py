@@ -21,7 +21,8 @@ from flask import (
     session,
     url_for,
 )
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, join_room
+from spotipy.cache_handler import FlaskSessionCacheHandler
 from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
@@ -68,6 +69,17 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=2)  # 2-hour session 
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+
+@socketio.on("connect")
+def handle_socket_connect():
+    # Put each client in a room keyed by their session so task progress and
+    # results are sent only to the user who started them, not broadcast to
+    # every connected client.
+    room = session.get("session_id")
+    if room:
+        join_room(room)
+
+
 # Spotify OAuth configuration
 SPOTIFY_CLIENT_ID = os.getenv("CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("CLIENT_SECRET")
@@ -107,11 +119,16 @@ def save_settings(settings):
 
 
 def get_spotify_oauth():
+    # Cache the token per-user in the Flask session instead of spotipy's
+    # default shared on-disk .cache file. The shared file caused every login
+    # to return the first user's token (get_access_token honours the cache),
+    # so multiple LAN users all saw the original user's account.
     return SpotifyOAuth(
         client_id=SPOTIFY_CLIENT_ID,
         client_secret=SPOTIFY_CLIENT_SECRET,
         redirect_uri=SPOTIFY_REDIRECT_URI,
         scope="playlist-read-private playlist-read-collaborative user-library-read playlist-modify-private playlist-modify-public",
+        cache_handler=FlaskSessionCacheHandler(session),
     )
 
 
@@ -177,8 +194,11 @@ def get_spotify_client():
     sp_oauth = get_spotify_oauth()
     if sp_oauth.is_token_expired(token_info):
         try:
+            # refresh_access_token also writes the new token back to the session
+            # via the cache handler. A static-token client (rather than passing
+            # the auth_manager) is intentional: the client is used from the
+            # background worker threads, which have no Flask request context.
             token_info = sp_oauth.refresh_access_token(token_info["refresh_token"])
-            session["token_info"] = token_info
         except Exception:
             # Token refresh failed, clear session
             session.clear()
@@ -364,9 +384,14 @@ def fetch_playlist():
     if "playlist/" in playlist_id:
         playlist_id = playlist_id.split("playlist/")[1].split("?")[0]
 
+    room = session.get("session_id")
+
+    def notify(event, data):
+        socketio.emit(event, data, to=room)
+
     def fetch_playlist_task():
         try:
-            socketio.emit(
+            notify(
                 "progress", {"message": "Starting playlist fetch...", "progress": 0}
             )
 
@@ -384,14 +409,14 @@ def fetch_playlist():
                 playlist_name, tracks = fetch_playlist_via_embed(
                     sp,
                     playlist_id,
-                    on_name=lambda name: socketio.emit(
+                    on_name=lambda name: notify(
                         "progress",
                         {
                             "message": f'Fetching tracks from "{name}"...',
                             "progress": 10,
                         },
                     ),
-                    on_progress=lambda count, total: socketio.emit(
+                    on_progress=lambda count, total: notify(
                         "progress",
                         {
                             "message": f"Fetched {count} tracks...",
@@ -405,7 +430,7 @@ def fetch_playlist():
                 )
             else:
                 playlist_name = playlist["name"]
-                socketio.emit(
+                notify(
                     "progress",
                     {
                         "message": f'Fetching tracks from "{playlist_name}"...',
@@ -437,7 +462,7 @@ def fetch_playlist():
                     progress = min(
                         90, int((offset / total) * 80) + 10
                     )
-                    socketio.emit(
+                    notify(
                         "progress",
                         {
                             "message": f"Fetched {offset} tracks...",
@@ -452,14 +477,14 @@ def fetch_playlist():
             json.dump(tracks, temp_file, ensure_ascii=False, indent=2)
             temp_file.close()
 
-            socketio.emit(
+            notify(
                 "progress",
                 {
                     "message": f"Completed! Fetched {len(tracks)} tracks.",
                     "progress": 100,
                 },
             )
-            socketio.emit(
+            notify(
                 "playlist_fetched",
                 {
                     "playlist_name": playlist_name,
@@ -470,7 +495,7 @@ def fetch_playlist():
             )
 
         except Exception as e:
-            socketio.emit("error", {"message": f"Error fetching playlist: {str(e)}"})
+            notify("error", {"message": f"Error fetching playlist: {str(e)}"})
 
     thread = threading.Thread(target=fetch_playlist_task)
     thread.start()
@@ -484,9 +509,14 @@ def fetch_liked_songs():
     if not sp:
         return jsonify({"error": "Not authenticated"}), 401
 
+    room = session.get("session_id")
+
+    def notify(event, data):
+        socketio.emit(event, data, to=room)
+
     def fetch_liked_task():
         try:
-            socketio.emit(
+            notify(
                 "progress",
                 {"message": "Getting total count of liked songs...", "progress": 0},
             )
@@ -495,7 +525,7 @@ def fetch_liked_songs():
             initial_results = sp.current_user_saved_tracks(limit=1, offset=0)
             total_tracks = initial_results["total"]
 
-            socketio.emit(
+            notify(
                 "progress",
                 {
                     "message": f"Found {total_tracks} liked songs. Starting fetch...",
@@ -522,7 +552,7 @@ def fetch_liked_songs():
                 offset += len(items)
                 # Calculate accurate progress: 5% for initial setup, 90% for fetching, 5% for saving
                 progress = 5 + int((offset / total_tracks) * 90)
-                socketio.emit(
+                notify(
                     "progress",
                     {
                         "message": f"Fetched {offset} of {total_tracks} liked songs...",
@@ -530,7 +560,7 @@ def fetch_liked_songs():
                     },
                 )
 
-            socketio.emit(
+            notify(
                 "progress", {"message": "Saving data to file...", "progress": 95}
             )
 
@@ -541,14 +571,14 @@ def fetch_liked_songs():
             json.dump(tracks, temp_file, ensure_ascii=False, indent=2)
             temp_file.close()
 
-            socketio.emit(
+            notify(
                 "progress",
                 {
                     "message": f"Completed! Fetched {len(tracks)} liked songs.",
                     "progress": 100,
                 },
             )
-            socketio.emit(
+            notify(
                 "liked_songs_fetched",
                 {
                     "track_count": len(tracks),
@@ -559,7 +589,7 @@ def fetch_liked_songs():
             )
 
         except Exception as e:
-            socketio.emit("error", {"message": f"Error fetching liked songs: {str(e)}"})
+            notify("error", {"message": f"Error fetching liked songs: {str(e)}"})
 
     thread = threading.Thread(target=fetch_liked_task)
     thread.start()
@@ -576,15 +606,20 @@ def generate_m3u():
     if not temp_file or not os.path.exists(temp_file):
         return jsonify({"error": "Invalid temp file"}), 400
 
+    room = session.get("session_id")
+
+    def notify(event, data):
+        socketio.emit(event, data, to=room)
+
     def generate_m3u_task():
         try:
-            socketio.emit(
+            notify(
                 "progress", {"message": "Generating M3U playlist...", "progress": 0}
             )
 
             # Check if database exists before proceeding
             if not os.path.exists(DATABASE_PATH):
-                socketio.emit(
+                notify(
                     "error",
                     {
                         "message": f"Navidrome database not found at {DATABASE_PATH}. Please ensure your database is mounted correctly."
@@ -600,7 +635,7 @@ def generate_m3u():
             # Import and use the existing M3U generation function
             from spoti_playlist_to_m3u import generate_m3u_from_db
 
-            socketio.emit(
+            notify(
                 "progress",
                 {
                     "message": "Processing tracks with Navidrome database...",
@@ -611,7 +646,7 @@ def generate_m3u():
 
             # Verify the file was actually created
             if not os.path.exists(output_file):
-                socketio.emit(
+                notify(
                     "error",
                     {
                         "message": "M3U file was not created. Check server logs for details."
@@ -619,15 +654,15 @@ def generate_m3u():
                 )
                 return
 
-            socketio.emit(
+            notify(
                 "progress",
                 {"message": "M3U playlist generated successfully!", "progress": 100},
             )
             # Send just the filename, not the full path (download endpoint adds OUTPUT_DIR)
-            socketio.emit("m3u_generated", {"file_path": os.path.basename(output_file)})
+            notify("m3u_generated", {"file_path": os.path.basename(output_file)})
 
         except Exception as e:
-            socketio.emit("error", {"message": f"Error generating M3U: {str(e)}"})
+            notify("error", {"message": f"Error generating M3U: {str(e)}"})
 
     thread = threading.Thread(target=generate_m3u_task)
     thread.start()
@@ -645,9 +680,14 @@ def scan_mb_albums():
     if not temp_file or not os.path.exists(temp_file):
         return jsonify({"error": "Invalid temp file"}), 400
 
+    room = session.get("session_id")
+
+    def notify(event, data):
+        socketio.emit(event, data, to=room)
+
     def scan_mb_task():
         try:
-            socketio.emit(
+            notify(
                 "progress",
                 {"message": "Starting MusicBrainz album scan...", "progress": 0},
             )
@@ -677,7 +717,7 @@ def scan_mb_albums():
                 albums[key]["tracks"].append(entry)
 
             total_albums = len(albums)
-            socketio.emit(
+            notify(
                 "progress",
                 {
                     "message": f"Found {total_albums} unique albums. Scanning MusicBrainz...",
@@ -692,7 +732,7 @@ def scan_mb_albums():
                 artist = info["artist"]
                 album = info["album"]
                 progress = 10 + int((idx / total_albums) * 80)
-                socketio.emit(
+                notify(
                     "progress",
                     {"message": f"Scanning: {artist} - {album}", "progress": progress},
                 )
@@ -723,7 +763,7 @@ def scan_mb_albums():
             with open(failed_output_file, "w", encoding="utf-8") as f:
                 json.dump(failed_matches, f, indent=2, ensure_ascii=False)
 
-            socketio.emit(
+            notify(
                 "progress", {"message": "MusicBrainz scan complete!", "progress": 100}
             )
             # Build list of found album keys for frontend matching
@@ -731,7 +771,7 @@ def scan_mb_albums():
                 {"artist": r["artist"].lower(), "album": r["album"].lower()}
                 for r in result
             ]
-            socketio.emit(
+            notify(
                 "mb_scan_complete",
                 {
                     "message": f"Found {len(result)} albums, {len(failed_matches)} failed",
@@ -743,7 +783,7 @@ def scan_mb_albums():
             )
 
         except Exception as e:
-            socketio.emit("error", {"message": f"Error scanning MusicBrainz: {str(e)}"})
+            notify("error", {"message": f"Error scanning MusicBrainz: {str(e)}"})
 
     thread = threading.Thread(target=scan_mb_task)
     thread.start()
@@ -766,9 +806,14 @@ def send_to_lidarr():
     if not os.path.exists(mb_file_path):
         return jsonify({"error": f"MusicBrainz file not found: {mb_file}"}), 400
 
+    room = session.get("session_id")
+
+    def notify(event, data):
+        socketio.emit(event, data, to=room)
+
     def send_to_lidarr_task():
         try:
-            socketio.emit(
+            notify(
                 "progress", {"message": "Loading MusicBrainz albums...", "progress": 0}
             )
 
@@ -776,7 +821,7 @@ def send_to_lidarr():
                 mb_albums = json.load(f)
 
             if not mb_albums:
-                socketio.emit(
+                notify(
                     "error", {"message": "No albums found in MusicBrainz file"}
                 )
                 return
@@ -801,7 +846,7 @@ def send_to_lidarr():
                 lidarr_settings.get("metadata_profile_id", 1)
             )
 
-            socketio.emit(
+            notify(
                 "progress",
                 {
                     "message": f"Adding {len(mb_albums)} albums to Lidarr...",
@@ -830,16 +875,16 @@ def send_to_lidarr():
                         break
                 raise Exception(error_msg)
 
-            socketio.emit(
+            notify(
                 "progress", {"message": "Successfully sent to Lidarr!", "progress": 100}
             )
-            socketio.emit(
+            notify(
                 "lidarr_complete",
                 {"message": f"{len(mb_albums)} albums processed by Lidarr"},
             )
 
         except Exception as e:
-            socketio.emit("error", {"message": f"Error sending to Lidarr: {str(e)}"})
+            notify("error", {"message": f"Error sending to Lidarr: {str(e)}"})
 
     thread = threading.Thread(target=send_to_lidarr_task)
     thread.start()
