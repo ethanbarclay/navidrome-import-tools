@@ -147,9 +147,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('navidrome-url').value = nd.url || '';
                 document.getElementById('navidrome-username').value = nd.username || '';
                 document.getElementById('navidrome-password').value = nd.password || '';
+
+                // Auto-check API status (like the DB status) if configured
+                if (nd.url && nd.username && nd.password) {
+                    checkNavidromeApiStatus();
+                }
             }
         } catch (error) {
             console.error('Failed to load settings:', error);
+        }
+    }
+
+    // Background check of the Navidrome API connection for the status badge
+    async function checkNavidromeApiStatus() {
+        updateStatusBadge('navidrome-api-status', 'secondary', 'Checking...');
+        try {
+            await window.spotifyApp.makeRequest('/api/test-navidrome-server', {
+                method: 'POST',
+                body: JSON.stringify({})
+            });
+            updateStatusBadge('navidrome-api-status', 'success', 'Connected');
+            updateStatusBadge('navidrome-server-status', 'success', 'Connected');
+        } catch (error) {
+            updateStatusBadge('navidrome-api-status', 'danger', 'Failed');
+            updateStatusBadge('navidrome-server-status', 'danger', 'Failed');
         }
     }
 
@@ -190,10 +211,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(settings)
             });
             updateStatusBadge('navidrome-server-status', 'success', 'Connected');
+            updateStatusBadge('navidrome-api-status', 'success', 'Connected');
             showTestResult('Navidrome Server Test', 'success',
                 response.message || 'Successfully connected to Navidrome!', null);
         } catch (error) {
             updateStatusBadge('navidrome-server-status', 'danger', 'Failed');
+            updateStatusBadge('navidrome-api-status', 'danger', 'Failed');
             showTestResult('Navidrome Server Test', 'danger',
                 `Connection failed: ${error.message}`, null);
         } finally {
