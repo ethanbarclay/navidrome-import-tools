@@ -71,8 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle JSON download
     if (downloadJsonBtn) {
         downloadJsonBtn.addEventListener('click', async () => {
-            if (!window.spotifyApp.currentTempFile) {
-                window.spotifyApp.showError('Please fetch a playlist first');
+            if (!window.spotifyApp.requireTempFile('Please fetch a playlist first')) {
                 return;
             }
 
@@ -83,8 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle M3U generation
     if (generateM3UBtn) {
         generateM3UBtn.addEventListener('click', async () => {
-            if (!window.spotifyApp.currentTempFile) {
-                window.spotifyApp.showError('Please fetch a playlist first');
+            if (!window.spotifyApp.requireTempFile('Please fetch a playlist first')) {
                 return;
             }
 
@@ -95,8 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Handle MB Albums scan
     if (scanMBAlbumsBtn) {
         scanMBAlbumsBtn.addEventListener('click', async () => {
-            if (!window.spotifyApp.currentTempFile) {
-                window.spotifyApp.showError('Please fetch a playlist first');
+            if (!window.spotifyApp.requireTempFile('Please fetch a playlist first')) {
                 return;
             }
 
@@ -147,8 +144,8 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="playlist-item mb-2" data-playlist-id="${playlist.id}">
                 <div class="d-flex align-items-center">
                     <div class="flex-shrink-0">
-                        ${playlist.images && playlist.images[0] 
-                            ? `<img src="${playlist.images[0].url}" alt="${playlist.name}" 
+                        ${playlist.images && playlist.images[0]
+                            ? `<img src="${playlist.images[0].url}" alt="${window.spotifyApp.escapeHtml(playlist.name)}"
                                  class="rounded" style="width: 40px; height: 40px; object-fit: cover;">`
                             : `<div class="bg-secondary rounded d-flex align-items-center justify-content-center" 
                                  style="width: 40px; height: 40px;">
@@ -179,80 +176,46 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Fetch playlist data
+    // Fetch playlist data (progress and results arrive via socket events)
     async function fetchPlaylist(playlistId) {
-        try {
-            window.spotifyApp.showProgress('Fetching Playlist');
-            
-            const response = await window.spotifyApp.makeRequest('/api/fetch-playlist', {
-                method: 'POST',
-                body: JSON.stringify({ playlist_id: playlistId })
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to fetch playlist: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/fetch-playlist', {
+            title: 'Fetching Playlist',
+            body: { playlist_id: playlistId },
+            errorLabel: 'fetch playlist'
+        });
     }
 
     // Generate M3U playlist
     async function generateM3U() {
-        try {
-            window.spotifyApp.showProgress('Generating M3U');
-            
-            const response = await window.spotifyApp.makeRequest('/api/generate-m3u', {
-                method: 'POST',
-                body: JSON.stringify({
-                    temp_file: window.spotifyApp.currentTempFile,
-                    playlist_name: window.spotifyApp.currentPlaylistName || 'spotify_playlist'
-                })
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to generate M3U: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/generate-m3u', {
+            title: 'Generating M3U',
+            body: {
+                temp_file: window.spotifyApp.currentTempFile,
+                playlist_name: window.spotifyApp.currentPlaylistName || 'spotify_playlist'
+            },
+            errorLabel: 'generate M3U'
+        });
     }
 
     // Scan MusicBrainz albums
     async function scanMBAlbums() {
-        try {
-            window.spotifyApp.showProgress('Scanning MusicBrainz');
-
-            const response = await window.spotifyApp.makeRequest('/api/scan-mb-albums', {
-                method: 'POST',
-                body: JSON.stringify({
-                    temp_file: window.spotifyApp.currentTempFile,
-                    playlist_name: window.spotifyApp.currentPlaylistName || 'playlist'
-                })
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to scan MusicBrainz: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/scan-mb-albums', {
+            title: 'Scanning MusicBrainz',
+            body: {
+                temp_file: window.spotifyApp.currentTempFile,
+                playlist_name: window.spotifyApp.currentPlaylistName || 'playlist'
+            },
+            errorLabel: 'scan MusicBrainz'
+        });
     }
 
     // Send to Lidarr
     async function sendToLidarr() {
-        try {
-            window.spotifyApp.showProgress('Sending to Lidarr');
-
-            const response = await window.spotifyApp.makeRequest('/api/send-to-lidarr', {
-                method: 'POST',
-                body: JSON.stringify({
-                    mb_file: currentMBFile
-                })
-            });
-
-            // Progress updates will be handled by socket events
-        } catch (error) {
-            window.spotifyApp.hideProgress();
-            window.spotifyApp.showError(`Failed to send to Lidarr: ${error.message}`);
-        }
+        await window.spotifyApp.runAction('/api/send-to-lidarr', {
+            title: 'Sending to Lidarr',
+            body: { mb_file: currentMBFile },
+            errorLabel: 'send to Lidarr'
+        });
     }
 
     // Download full JSON data
