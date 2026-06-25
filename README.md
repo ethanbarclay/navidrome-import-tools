@@ -12,6 +12,7 @@ Features an optional web interface with real-time progress tracking and playlist
 - **Playlist Management**: Fetch and export any Spotify playlist
 - **Liked Songs Export**: Export your entire liked songs collection
 - **M3U Generation**: Create playlist files compatible with Navidrome and other media players
+- **Send to Navidrome**: Create a playlist directly in Navidrome via the Subsonic API (no manual M3U import)
 - **Lidarr Integration**: Automatically add albums to your Lidarr instance
 - **Playlist Splitting**: Split large collections into manageable playlists
 - **Real-time Progress**: Live updates during processing via WebSocket
@@ -233,6 +234,9 @@ python scripts/spoti_playlist_to_m3u.py generate --json playlist_tracks.json "Pl
 
 # Use direct database queries instead of in-memory search (lower memory usage)
 python scripts/spoti_playlist_to_m3u.py generate --spotify "https://open.spotify.com/playlist/ID" output.m3u --no-memory
+
+# Create the playlist directly in Navidrome (Subsonic API) instead of an M3U file
+python scripts/spoti_playlist_to_m3u.py send-navidrome --spotify "https://open.spotify.com/playlist/ID" --name "My Playlist"
 ```
 
 `--spotify` and `--json` are mutually exclusive (one is required). When using `--spotify`, the playlist name is auto-fetched from the Spotify API. An optional `playlist_name` argument can override it.
@@ -240,6 +244,12 @@ python scripts/spoti_playlist_to_m3u.py generate --spotify "https://open.spotify
 **Requires:** `DATABASE_PATH`, `OUTPUT_DIR`. Additionally `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI` when using `--spotify`.
 
 **Outputs:** `{name}.m3u` playlist file, `{name}_failed_matches.json` for unmatched tracks
+
+##### `send-navidrome` subcommand
+
+Matches tracks against `DATABASE_PATH` and creates the playlist in Navidrome via the Subsonic API — only tracks found in your library are added.
+
+**Requires:** `DATABASE_PATH` and `NAVIDROME_URL` / `NAVIDROME_USER` / `NAVIDROME_PASSWORD` (or the `--navidrome-url/-user/-password` flags). With `--json`, `--name` is required.
 
 #### `process_spotify_mb.py`
 

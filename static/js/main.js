@@ -49,6 +49,11 @@ class SpotifyMigrationApp {
             this.hideProgress();
             this.handleLidarrComplete(data);
         });
+
+        this.socket.on('navidrome_complete', (data) => {
+            this.hideProgress();
+            this.handleNavidromeComplete(data);
+        });
     }
 
     bindEvents() {
@@ -373,6 +378,16 @@ class SpotifyMigrationApp {
     // Lidarr completion handling
     handleLidarrComplete(data) {
         this.showSuccess(data.message);
+    }
+
+    // Navidrome playlist completion handling
+    handleNavidromeComplete(data) {
+        const name = data.playlist_name || 'playlist';
+        let message = `Created playlist "${name}" in Navidrome — added ${data.added} of ${data.total} tracks.`;
+        if (data.skipped > 0) {
+            message += ` ${data.skipped} not in your library.`;
+        }
+        this.showSuccess(message);
     }
 
     // Download JSON function

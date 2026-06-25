@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const playlistInput = document.getElementById('playlist-input');
     const downloadJsonBtn = document.getElementById('download-json');
     const generateM3UBtn = document.getElementById('generate-m3u');
+    const sendToNavidromeBtn = document.getElementById('send-to-navidrome');
     const scanMBAlbumsBtn = document.getElementById('scan-mb-albums');
     const sendToLidarrBtn = document.getElementById('send-to-lidarr');
     const userPlaylistsDiv = document.getElementById('user-playlists');
@@ -87,6 +88,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             await generateM3U();
+        });
+    }
+
+    // Handle Send to Navidrome
+    if (sendToNavidromeBtn) {
+        sendToNavidromeBtn.addEventListener('click', async () => {
+            if (!window.spotifyApp.requireTempFile('Please fetch a playlist first')) {
+                return;
+            }
+
+            await sendToNavidrome();
         });
     }
 
@@ -194,6 +206,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 playlist_name: window.spotifyApp.currentPlaylistName || 'spotify_playlist'
             },
             errorLabel: 'generate M3U'
+        });
+    }
+
+    // Send playlist to Navidrome as a new playlist
+    async function sendToNavidrome() {
+        await window.spotifyApp.runAction('/api/send-to-navidrome', {
+            title: 'Sending to Navidrome',
+            body: {
+                temp_file: window.spotifyApp.currentTempFile,
+                playlist_name: window.spotifyApp.currentPlaylistName || 'Spotify Playlist'
+            },
+            errorLabel: 'send to Navidrome'
         });
     }
 

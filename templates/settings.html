@@ -156,6 +156,45 @@
                 </button>
             </div>
         </div>
+
+        <div class="card mt-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-list-music text-success me-2"></i>
+                    Navidrome Server (Playlists)
+                </h5>
+                <span id="navidrome-server-status" class="badge bg-secondary">Unknown</span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Used by "Send to Navidrome" to create playlists via the Subsonic API.
+                </p>
+                <form id="navidrome-settings">
+                    <div class="mb-3">
+                        <label for="navidrome-url" class="form-label">Server URL</label>
+                        <input type="url" class="form-control" id="navidrome-url"
+                               placeholder="http://your-navidrome:4533">
+                        <div class="form-text">Base URL of your Navidrome server (no /rest)</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="navidrome-username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="navidrome-username"
+                               placeholder="Your Navidrome username">
+                    </div>
+                    <div class="mb-3">
+                        <label for="navidrome-password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="navidrome-password"
+                               placeholder="Your Navidrome password">
+                    </div>
+                    <button type="button" class="btn btn-success" id="test-navidrome-server">
+                        <i class="fas fa-plug me-1"></i>Test Connection
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-1"></i>Save Settings
+                    </button>
+                </form>
+            </div>
+        </div>
     </div>
 
     <div class="col-md-4">
