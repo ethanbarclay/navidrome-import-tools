@@ -338,6 +338,49 @@ def generate_m3u_from_db(
             traceback.print_exc()
 
 
+def collect_navidrome_song_ids(spotify_playlist_json_path, db_path=DB_PATH):
+    """Match Spotify tracks against the Navidrome library and collect song ids.
+
+    Reuses the same in-memory matcher as M3U generation, but returns the
+    matched ``media_file.id`` values (which are also the Subsonic song ids)
+    instead of writing an M3U.
+
+    Returns:
+        dict: {"matched_ids": [...], "matched": int, "total": int,
+               "failed": [{"track_name", "artist_name"}, ...]}
+    """
+    with open(spotify_playlist_json_path, "r", encoding="utf-8") as f:
+        spotify_tracks = json.load(f)
+
+    total = len(spotify_tracks)
+    matched_ids = []
+    failed = []
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
+    try:
+        library = NavidromeLibrary(conn)
+        for track in spotify_tracks:
+            song = library.search_track(track["track_name"], track["artist_name"])
+            if song and song.get("id"):
+                matched_ids.append(song["id"])
+            else:
+                failed.append(
+                    {
+                        "track_name": track["track_name"],
+                        "artist_name": track["artist_name"],
+                    }
+                )
+    finally:
+        conn.close()
+
+    return {
+        "matched_ids": matched_ids,
+        "matched": len(matched_ids),
+        "total": total,
+        "failed": failed,
+    }
+
+
 def list_songs(conn, limit=5):
     """Fetch and print song info from the database."""
     cursor = conn.execute(
@@ -400,6 +443,33 @@ def main():
         "--no-memory",
         action="store_true",
         help="Use direct database queries instead of in-memory search",
+    )
+
+    # send-navidrome command
+    nd_parser = subparsers.add_parser(
+        "send-navidrome",
+        help="Create a playlist in Navidrome (Subsonic API) from Spotify data",
+    )
+    nd_source = nd_parser.add_mutually_exclusive_group(required=True)
+    nd_source.add_argument(
+        "--spotify",
+        metavar="URL_OR_ID",
+        help="Fetch tracks directly from a Spotify playlist URL or ID",
+    )
+    nd_source.add_argument(
+        "--json",
+        metavar="FILE",
+        help="Use a pre-fetched JSON file of playlist tracks",
+    )
+    nd_parser.add_argument(
+        "--name",
+        default=None,
+        help="Playlist name (required with --json, auto-fetched with --spotify)",
+    )
+    nd_parser.add_argument("--navidrome-url", default=os.getenv("NAVIDROME_URL", ""))
+    nd_parser.add_argument("--navidrome-user", default=os.getenv("NAVIDROME_USER", ""))
+    nd_parser.add_argument(
+        "--navidrome-password", default=os.getenv("NAVIDROME_PASSWORD", "")
     )
 
     args = parser.parse_args()
@@ -468,6 +538,75 @@ def main():
         # Clean up temp file if we created one
         if args.spotify:
             os.unlink(spotify_json)
+
+    elif args.command == "send-navidrome":
+        from navidrome_client import NavidromeClient, NavidromeError
+
+        # Resolve tracks JSON + playlist name (same source handling as generate)
+        if args.spotify:
+            from spotify_client import (
+                extract_playlist_id,
+                fetch_playlist_tracks,
+                get_spotify_client,
+            )
+
+            sp = get_spotify_client()
+            playlist_id = extract_playlist_id(args.spotify)
+            playlist_name, tracks = fetch_playlist_tracks(sp, playlist_id)
+            if args.name:
+                playlist_name = args.name
+
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, encoding="utf-8"
+            )
+            json.dump(tracks, tmp, ensure_ascii=False, indent=2)
+            tmp.close()
+            spotify_json = tmp.name
+        else:
+            spotify_json = args.json
+            playlist_name = args.name
+            if not playlist_name:
+                print("Error: --name is required when using --json")
+                sys.exit(1)
+            if not os.path.exists(spotify_json):
+                print(f"Error: Spotify playlist JSON file not found: {spotify_json}")
+                return
+
+        try:
+            result = collect_navidrome_song_ids(spotify_json)
+            if not result["matched_ids"]:
+                print(
+                    f"No matches: none of the {result['total']} tracks were found "
+                    "in your Navidrome library."
+                )
+                return
+
+            print(
+                f"Matched {result['matched']} of {result['total']} tracks. "
+                "Creating playlist..."
+            )
+            client = NavidromeClient(
+                args.navidrome_url, args.navidrome_user, args.navidrome_password
+            )
+            playlist_id = client.create_playlist(
+                playlist_name,
+                result["matched_ids"],
+                on_progress=lambda a, t: print(f"  added {a}/{t}", flush=True),
+            )
+
+            skipped = result["total"] - result["matched"]
+            summary = (
+                f"Created playlist '{playlist_name}' (id {playlist_id}): "
+                f"added {result['matched']} of {result['total']} tracks"
+            )
+            summary += f", {skipped} not in library." if skipped else "."
+            print(summary)
+        except NavidromeError as e:
+            print(f"Navidrome error: {e}")
+            sys.exit(1)
+        finally:
+            if args.spotify and os.path.exists(spotify_json):
+                os.unlink(spotify_json)
 
 
 if __name__ == "__main__":

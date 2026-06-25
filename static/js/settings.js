@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const lidarrForm = document.getElementById('lidarr-settings');
     const testLidarrBtn = document.getElementById('test-lidarr');
     const testNavidromeBtn = document.getElementById('test-navidrome');
+    const navidromeForm = document.getElementById('navidrome-settings');
+    const testNavidromeServerBtn = document.getElementById('test-navidrome-server');
 
     // Handle Lidarr settings form
     if (lidarrForm) {
@@ -23,6 +25,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (testNavidromeBtn) {
         testNavidromeBtn.addEventListener('click', async () => {
             await testNavidromeDatabase();
+        });
+    }
+
+    // Handle Navidrome server settings form
+    if (navidromeForm) {
+        navidromeForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await saveNavidromeSettings();
+        });
+    }
+
+    // Handle Navidrome server connection test
+    if (testNavidromeServerBtn) {
+        testNavidromeServerBtn.addEventListener('click', async () => {
+            await testNavidromeServer();
         });
     }
 
@@ -123,8 +140,88 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('quality-profile').value = lidarr.quality_profile_id || 1;
                 document.getElementById('metadata-profile').value = lidarr.metadata_profile_id || 1;
             }
+
+            // Populate Navidrome server settings
+            if (response.navidrome) {
+                const nd = response.navidrome;
+                document.getElementById('navidrome-url').value = nd.url || '';
+                document.getElementById('navidrome-username').value = nd.username || '';
+                document.getElementById('navidrome-password').value = nd.password || '';
+
+                // Auto-check API status (like the DB status) if configured
+                if (nd.url && nd.username && nd.password) {
+                    checkNavidromeApiStatus();
+                }
+            }
         } catch (error) {
             console.error('Failed to load settings:', error);
+        }
+    }
+
+    // Background check of the Navidrome API connection for the status badge
+    async function checkNavidromeApiStatus() {
+        updateStatusBadge('navidrome-api-status', 'secondary', 'Checking...');
+        try {
+            await window.spotifyApp.makeRequest('/api/test-navidrome-server', {
+                method: 'POST',
+                body: JSON.stringify({})
+            });
+            updateStatusBadge('navidrome-api-status', 'success', 'Connected');
+            updateStatusBadge('navidrome-server-status', 'success', 'Connected');
+        } catch (error) {
+            updateStatusBadge('navidrome-api-status', 'danger', 'Failed');
+            updateStatusBadge('navidrome-server-status', 'danger', 'Failed');
+        }
+    }
+
+    // Save Navidrome server settings
+    async function saveNavidromeSettings() {
+        const settings = {
+            url: document.getElementById('navidrome-url').value.trim(),
+            username: document.getElementById('navidrome-username').value.trim(),
+            password: document.getElementById('navidrome-password').value,
+        };
+
+        try {
+            const response = await window.spotifyApp.makeRequest('/api/settings/navidrome', {
+                method: 'POST',
+                body: JSON.stringify(settings)
+            });
+            window.spotifyApp.showSuccess(response.message || 'Navidrome settings saved');
+        } catch (error) {
+            window.spotifyApp.showError(`Failed to save Navidrome settings: ${error.message}`);
+        }
+    }
+
+    // Test Navidrome server connection
+    async function testNavidromeServer() {
+        const settings = {
+            url: document.getElementById('navidrome-url').value.trim(),
+            username: document.getElementById('navidrome-username').value.trim(),
+            password: document.getElementById('navidrome-password').value,
+        };
+
+        const originalText = testNavidromeServerBtn.innerHTML;
+        testNavidromeServerBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Testing...';
+        testNavidromeServerBtn.disabled = true;
+
+        try {
+            const response = await window.spotifyApp.makeRequest('/api/test-navidrome-server', {
+                method: 'POST',
+                body: JSON.stringify(settings)
+            });
+            updateStatusBadge('navidrome-server-status', 'success', 'Connected');
+            updateStatusBadge('navidrome-api-status', 'success', 'Connected');
+            showTestResult('Navidrome Server Test', 'success',
+                response.message || 'Successfully connected to Navidrome!', null);
+        } catch (error) {
+            updateStatusBadge('navidrome-server-status', 'danger', 'Failed');
+            updateStatusBadge('navidrome-api-status', 'danger', 'Failed');
+            showTestResult('Navidrome Server Test', 'danger',
+                `Connection failed: ${error.message}`, null);
+        } finally {
+            testNavidromeServerBtn.innerHTML = originalText;
+            testNavidromeServerBtn.disabled = false;
         }
     }
 

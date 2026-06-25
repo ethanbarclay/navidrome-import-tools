@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fetchLikedBtn = document.getElementById('fetch-liked-songs');
     const downloadJsonBtn = document.getElementById('download-json-liked');
     const generateM3UBtn = document.getElementById('generate-m3u-liked');
+    const sendToNavidromeBtn = document.getElementById('send-to-navidrome-liked');
     const sendToLidarrBtn = document.getElementById('send-to-lidarr-liked');
     const splitPlaylistsBtn = document.getElementById('split-playlists');
     const confirmSplitBtn = document.getElementById('confirm-split');
@@ -55,6 +56,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             await generateM3U();
+        });
+    }
+
+    // Handle Send to Navidrome
+    if (sendToNavidromeBtn) {
+        sendToNavidromeBtn.addEventListener('click', async () => {
+            if (!window.spotifyApp.requireTempFile('Please fetch your liked songs first')) {
+                return;
+            }
+
+            await sendToNavidrome();
         });
     }
 
@@ -115,6 +127,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 playlist_name: 'liked_songs'
             },
             errorLabel: 'generate M3U'
+        });
+    }
+
+    // Send liked songs to Navidrome as a new playlist
+    async function sendToNavidrome() {
+        await window.spotifyApp.runAction('/api/send-to-navidrome', {
+            title: 'Sending to Navidrome',
+            body: {
+                temp_file: window.spotifyApp.currentTempFile,
+                playlist_name: 'Liked Songs'
+            },
+            errorLabel: 'send to Navidrome'
         });
     }
 

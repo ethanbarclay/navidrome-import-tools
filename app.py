@@ -29,6 +29,8 @@ from spotipy.oauth2 import SpotifyOAuth
 # Add scripts directory to path to import existing scripts
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
 
+from navidrome_client import NavidromeClient, NavidromeError  # noqa: E402
+from spoti_playlist_to_m3u import collect_navidrome_song_ids  # noqa: E402
 from spotify_client import (  # noqa: E402
     fetch_playlist_via_embed,
     flatten_track_item,
@@ -92,6 +94,11 @@ os.environ["REDIRECT_URI"] = SPOTIFY_REDIRECT_URI
 DATABASE_PATH = os.getenv("DATABASE_PATH", "navidrome.db")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", ".")
 DATA_DIR = os.getenv("DATA_DIR", "data")
+
+# Navidrome server (Subsonic API) configuration for creating playlists
+NAVIDROME_URL = os.getenv("NAVIDROME_URL", "")
+NAVIDROME_USER = os.getenv("NAVIDROME_USER", "")
+NAVIDROME_PASSWORD = os.getenv("NAVIDROME_PASSWORD", "")
 
 # Settings file for runtime configuration
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
@@ -284,6 +291,16 @@ def settings():
     )
 
 
+def get_navidrome_settings():
+    """Resolve Navidrome server settings from saved settings, falling back to env."""
+    nd = load_settings().get("navidrome", {})
+    return {
+        "url": nd.get("url") or NAVIDROME_URL,
+        "username": nd.get("username") or NAVIDROME_USER,
+        "password": nd.get("password") or NAVIDROME_PASSWORD,
+    }
+
+
 @app.route("/api/settings")
 def get_settings():
     """Get current settings"""
@@ -299,7 +316,8 @@ def get_settings():
                     "quality_profile_id": 1,
                     "metadata_profile_id": 1,
                 },
-            )
+            ),
+            "navidrome": get_navidrome_settings(),
         }
     )
 
@@ -320,6 +338,38 @@ def save_lidarr_settings():
     save_settings(saved_settings)
 
     return jsonify({"success": True, "message": "Lidarr settings saved"})
+
+
+@app.route("/api/settings/navidrome", methods=["POST"])
+def save_navidrome_settings():
+    """Save Navidrome server (Subsonic) settings"""
+    data = request.get_json()
+
+    saved_settings = load_settings()
+    saved_settings["navidrome"] = {
+        "url": data.get("url", ""),
+        "username": data.get("username", ""),
+        "password": data.get("password", ""),
+    }
+    save_settings(saved_settings)
+
+    return jsonify({"success": True, "message": "Navidrome settings saved"})
+
+
+@app.route("/api/test-navidrome-server", methods=["POST"])
+def test_navidrome_server():
+    """Test connectivity/credentials against the Navidrome server."""
+    data = request.get_json() or {}
+    # Use posted values if provided (test before saving), else saved/env settings.
+    url = data.get("url") or get_navidrome_settings()["url"]
+    username = data.get("username") or get_navidrome_settings()["username"]
+    password = data.get("password") or get_navidrome_settings()["password"]
+
+    try:
+        NavidromeClient(url, username, password).ping()
+        return jsonify({"success": True, "message": "Connected to Navidrome"})
+    except NavidromeError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 
 @app.route("/api/user-profile")
@@ -668,6 +718,97 @@ def generate_m3u():
     thread.start()
 
     return jsonify({"message": "M3U generation started"})
+
+
+@app.route("/api/send-to-navidrome", methods=["POST"])
+def send_to_navidrome():
+    data = request.get_json()
+    temp_file = data.get("temp_file")
+    playlist_name = data.get("playlist_name", "Spotify Playlist")
+
+    if not temp_file or not os.path.exists(temp_file):
+        return jsonify({"error": "Invalid temp file"}), 400
+
+    nd_settings = get_navidrome_settings()
+    if not all(nd_settings.values()):
+        return jsonify(
+            {"error": "Navidrome server is not configured. Add it in Settings."}
+        ), 400
+
+    room = session.get("session_id")
+
+    def notify(event, payload):
+        socketio.emit(event, payload, to=room)
+
+    def send_to_navidrome_task():
+        try:
+            if not os.path.exists(DATABASE_PATH):
+                notify(
+                    "error",
+                    {
+                        "message": f"Navidrome database not found at {DATABASE_PATH}. "
+                        "Please ensure your database is mounted correctly."
+                    },
+                )
+                return
+
+            notify(
+                "progress",
+                {"message": "Matching tracks against your library...", "progress": 10},
+            )
+            result = collect_navidrome_song_ids(temp_file, db_path=DATABASE_PATH)
+            song_ids = result["matched_ids"]
+
+            if not song_ids:
+                notify(
+                    "error",
+                    {
+                        "message": f"None of the {result['total']} tracks were found "
+                        "in your Navidrome library."
+                    },
+                )
+                return
+
+            notify(
+                "progress",
+                {
+                    "message": f"Creating playlist with {len(song_ids)} tracks...",
+                    "progress": 50,
+                },
+            )
+
+            client = NavidromeClient(
+                nd_settings["url"], nd_settings["username"], nd_settings["password"]
+            )
+
+            def on_progress(added, total):
+                pct = 50 + int((added / total) * 45) if total else 95
+                notify(
+                    "progress",
+                    {"message": f"Added {added} of {total} tracks...", "progress": pct},
+                )
+
+            client.create_playlist(playlist_name, song_ids, on_progress=on_progress)
+
+            notify(
+                "navidrome_complete",
+                {
+                    "playlist_name": playlist_name,
+                    "added": result["matched"],
+                    "total": result["total"],
+                    "skipped": result["total"] - result["matched"],
+                },
+            )
+
+        except NavidromeError as e:
+            notify("error", {"message": f"Navidrome error: {str(e)}"})
+        except Exception as e:
+            notify("error", {"message": f"Error sending to Navidrome: {str(e)}"})
+
+    thread = threading.Thread(target=send_to_navidrome_task)
+    thread.start()
+
+    return jsonify({"message": "Send to Navidrome started"})
 
 
 @app.route("/api/scan-mb-albums", methods=["POST"])
