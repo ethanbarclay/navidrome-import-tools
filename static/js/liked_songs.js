@@ -16,12 +16,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Track the scanned MusicBrainz file; Lidarr consumes it, not the raw
     // liked-songs export, so it stays null until a scan completes.
     let currentMBFile = null;
+    // Id of the scan this page started; completions from another tab or from a
+    // superseded scan carry a different one and are ignored.
+    let pendingScanId = null;
 
     // Load the total liked-songs count on page mount
     loadLikedSongsCount();
 
     if (window.spotifyApp && window.spotifyApp.socket) {
         window.spotifyApp.socket.on('mb_scan_complete', (data) => {
+            if (!pendingScanId || data.scan_id !== pendingScanId) {
+                return;
+            }
+            pendingScanId = null;
+
             window.spotifyApp.hideProgress();
             currentMBFile = data.mb_file;
 
@@ -51,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // A fresh fetch invalidates the previous scan's album file.
         window.spotifyApp.socket.on('liked_songs_fetched', () => {
             currentMBFile = null;
+            pendingScanId = null;
             if (sendToLidarrBtn) {
                 sendToLidarrBtn.disabled = true;
             }
@@ -203,14 +212,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Scan MusicBrainz albums
     async function scanMBAlbums() {
-        await window.spotifyApp.runAction('/api/scan-mb-albums', {
+        const scanId = window.spotifyApp.newOperationId();
+        pendingScanId = scanId;
+
+        const started = await window.spotifyApp.runAction('/api/scan-mb-albums', {
             title: 'Scanning MusicBrainz',
             body: {
                 temp_file: window.spotifyApp.currentTempFile,
-                playlist_name: 'liked_songs'
+                playlist_name: 'liked_songs',
+                scan_id: scanId
             },
             errorLabel: 'scan MusicBrainz'
         });
+
+        if (!started && pendingScanId === scanId) {
+            pendingScanId = null;
+        }
     }
 
     // Send to Lidarr

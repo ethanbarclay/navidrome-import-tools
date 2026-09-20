@@ -957,6 +957,9 @@ def scan_mb_albums():
     data = request.get_json()
     temp_file = data.get("temp_file")
     playlist_name = data.get("playlist_name", "playlist")
+    # Echoed back with the result so the page that started this scan can tell
+    # it apart from one started in another tab on the same session.
+    scan_id = str(data.get("scan_id") or "")[:64]
 
     if not temp_file or not os.path.exists(temp_file):
         return jsonify({"error": "Invalid temp file"}), 400
@@ -1065,6 +1068,7 @@ def scan_mb_albums():
                     "failed": len(failed_matches),
                     "mb_file": os.path.basename(mb_output_file),
                     "found_albums": found_albums,
+                    "scan_id": scan_id,
                 },
             )
 
