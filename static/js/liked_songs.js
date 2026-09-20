@@ -37,6 +37,17 @@ document.addEventListener('DOMContentLoaded', () => {
             window.spotifyApp.showSuccess(data.message);
         });
 
+        window.spotifyApp.socket.on('split_complete', (data) => {
+            window.spotifyApp.hideProgress();
+            window.spotifyApp.showSuccess(
+                `Successfully created ${data.playlist_count} playlists with your liked songs!`
+            );
+
+            if (splitSettingsDiv) {
+                splitSettingsDiv.style.display = 'none';
+            }
+        });
+
         // A fresh fetch invalidates the previous scan's album file.
         window.spotifyApp.socket.on('liked_songs_fetched', () => {
             currentMBFile = null;
@@ -319,20 +330,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-// Add split functionality to the main app
-if (window.spotifyApp) {
-    // Add socket handler for split completion
-    window.spotifyApp.socket.on('split_complete', (data) => {
-        window.spotifyApp.hideProgress();
-        window.spotifyApp.showSuccess(
-            `Successfully created ${data.playlist_count} playlists with your liked songs!`
-        );
-        
-        // Hide split settings after successful split
-        const splitSettingsDiv = document.getElementById('split-settings');
-        if (splitSettingsDiv) {
-            splitSettingsDiv.style.display = 'none';
-        }
-    });
-}
