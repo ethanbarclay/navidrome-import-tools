@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -123,6 +124,27 @@ def save_settings(settings):
     """Save settings to JSON file"""
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=2)
+
+
+MB_ALBUMS_SUFFIX = "_mb_albums.json"
+MB_FAILED_SUFFIX = "_mb_failed.json"
+
+
+def mb_scan_filename(playlist_name, scope, suffix):
+    """Build a per-session MusicBrainz output filename.
+
+    The scope keeps concurrent scans apart: the liked-songs page always scans
+    under the same playlist_name, so without it every session would read and
+    write one shared file and a second scan could hand the first user's Lidarr
+    import the wrong albums.
+    """
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", playlist_name.replace(" ", "_"))
+    return f"{safe_name}__{scope}{suffix}"
+
+
+def owns_mb_file(mb_file, scope):
+    """True if mb_file was produced by this session's own scan."""
+    return bool(scope) and mb_file.endswith(f"__{scope}{MB_ALBUMS_SUFFIX}")
 
 
 def get_spotify_oauth():
@@ -811,17 +833,140 @@ def send_to_navidrome():
     return jsonify({"message": "Send to Navidrome started"})
 
 
+@app.route("/api/split-liked-songs", methods=["POST"])
+def split_liked_songs():
+    """Split a fetched liked-songs file into several Spotify playlists.
+
+    Web equivalent of scripts/spotify_liked_chopper.py: reuses the JSON the
+    liked-songs fetch already wrote instead of re-reading the library.
+    """
+    sp = get_spotify_client()
+    if not sp:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    data = request.get_json() or {}
+    temp_file = data.get("temp_file")
+    playlist_prefix = (data.get("playlist_prefix") or "My Liked Songs").strip()
+
+    if not temp_file or not os.path.exists(temp_file):
+        return jsonify({"error": "Invalid temp file"}), 400
+
+    if not playlist_prefix:
+        return jsonify({"error": "Playlist name prefix is required"}), 400
+
+    try:
+        playlist_size = int(data.get("playlist_size", 500))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid playlist size"}), 400
+
+    # Mirror the bounds the form enforces so a hand-crafted request can't ask
+    # for 1-track playlists (or blow past Spotify's 10k playlist limit).
+    if not 50 <= playlist_size <= 1000:
+        return jsonify({"error": "Playlist size must be between 50 and 1000"}), 400
+
+    room = session.get("session_id")
+
+    def notify(event, payload):
+        socketio.emit(event, payload, to=room)
+
+    def split_task():
+        try:
+            with open(temp_file, "r", encoding="utf-8") as f:
+                tracks = json.load(f)
+
+            # Local-only files have no track id and can't be added via the API.
+            track_ids = [t["track_id"] for t in tracks if t.get("track_id")]
+            skipped = len(tracks) - len(track_ids)
+
+            if not track_ids:
+                notify("error", {"message": "No tracks available to split."})
+                return
+
+            batches = [
+                track_ids[i : i + playlist_size]
+                for i in range(0, len(track_ids), playlist_size)
+            ]
+            total_batches = len(batches)
+
+            notify(
+                "progress",
+                {
+                    "message": f"Creating {total_batches} playlists from "
+                    f"{len(track_ids)} songs...",
+                    "progress": 5,
+                },
+            )
+
+            user_id = sp.current_user()["id"]
+            added_total = 0
+            playlist_names = []
+
+            for batch_num, batch in enumerate(batches, start=1):
+                playlist_name = f"{playlist_prefix} {batch_num}"
+                new_playlist = sp.user_playlist_create(
+                    user=user_id, name=playlist_name, public=False
+                )
+                playlist_names.append(playlist_name)
+
+                # Spotify caps additions at 100 tracks per request.
+                for i in range(0, len(batch), 100):
+                    chunk = batch[i : i + 100]
+                    sp.playlist_add_items(new_playlist["id"], chunk)
+                    added_total += len(chunk)
+                    progress = 5 + int((added_total / len(track_ids)) * 92)
+                    notify(
+                        "progress",
+                        {
+                            "message": f"Playlist {batch_num} of {total_batches}: "
+                            f"added {added_total} of {len(track_ids)} songs...",
+                            "progress": progress,
+                        },
+                    )
+
+            notify(
+                "progress",
+                {
+                    "message": f"Completed! Created {total_batches} playlists.",
+                    "progress": 100,
+                },
+            )
+            notify(
+                "split_complete",
+                {
+                    "playlist_count": total_batches,
+                    "track_count": len(track_ids),
+                    "skipped": skipped,
+                    "playlist_names": playlist_names,
+                },
+            )
+
+        except SpotifyException as e:
+            notify("error", {"message": f"Spotify error: {str(e)}"})
+        except Exception as e:
+            notify("error", {"message": f"Error splitting liked songs: {str(e)}"})
+
+    thread = threading.Thread(target=split_task)
+    thread.start()
+
+    return jsonify({"message": "Split started"})
+
+
 @app.route("/api/scan-mb-albums", methods=["POST"])
 def scan_mb_albums():
     """Scan MusicBrainz for album IDs from a Spotify playlist"""
     data = request.get_json()
     temp_file = data.get("temp_file")
     playlist_name = data.get("playlist_name", "playlist")
+    # Echoed back with the result so the page that started this scan can tell
+    # it apart from one started in another tab on the same session.
+    scan_id = str(data.get("scan_id") or "")[:64]
 
     if not temp_file or not os.path.exists(temp_file):
         return jsonify({"error": "Invalid temp file"}), 400
 
     room = session.get("session_id")
+    if not room:
+        return jsonify({"error": "No active session. Please sign in again."}), 401
 
     def notify(event, data):
         socketio.emit(event, data, to=room)
@@ -893,10 +1038,13 @@ def scan_mb_albums():
 
                 time.sleep(1.1)  # MusicBrainz rate limit
 
-            # Save results to OUTPUT_DIR
-            safe_name = playlist_name.replace(" ", "_")
-            mb_output_file = os.path.join(OUTPUT_DIR, f"{safe_name}_mb_albums.json")
-            failed_output_file = os.path.join(OUTPUT_DIR, f"{safe_name}_mb_failed.json")
+            # Save results to OUTPUT_DIR, scoped to the requesting session
+            mb_output_file = os.path.join(
+                OUTPUT_DIR, mb_scan_filename(playlist_name, room, MB_ALBUMS_SUFFIX)
+            )
+            failed_output_file = os.path.join(
+                OUTPUT_DIR, mb_scan_filename(playlist_name, room, MB_FAILED_SUFFIX)
+            )
 
             with open(mb_output_file, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)
@@ -920,6 +1068,7 @@ def scan_mb_albums():
                     "failed": len(failed_matches),
                     "mb_file": os.path.basename(mb_output_file),
                     "found_albums": found_albums,
+                    "scan_id": scan_id,
                 },
             )
 
@@ -943,11 +1092,18 @@ def send_to_lidarr():
             {"error": "No MusicBrainz file specified. Run Scan MB Albums first."}
         ), 400
 
+    # Ignore any directory component, then confirm the scan belongs to this
+    # session so one user can't send another's albums to Lidarr.
+    mb_file = os.path.basename(mb_file)
+    room = session.get("session_id")
+    if not owns_mb_file(mb_file, room):
+        return jsonify(
+            {"error": "That MusicBrainz scan isn't from this session. Re-run Scan MB Albums."}
+        ), 403
+
     mb_file_path = os.path.join(OUTPUT_DIR, mb_file)
     if not os.path.exists(mb_file_path):
         return jsonify({"error": f"MusicBrainz file not found: {mb_file}"}), 400
-
-    room = session.get("session_id")
 
     def notify(event, data):
         socketio.emit(event, data, to=room)

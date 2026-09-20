@@ -249,6 +249,42 @@ body {
     background: #a8a8a8;
 }
 
+/* Grouped action buttons (liked songs export options) */
+.action-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.action-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--spotify-gray);
+}
+
+/* auto-fill (not auto-fit) keeps the empty tracks, so a group holding a single
+   button gets one column's width instead of stretching across the card. Every
+   button lines up at the same width, whatever the group. */
+.action-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 0.5rem;
+}
+
+.action-row .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.action-status {
+    margin-top: 0.5rem;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .card-body {
@@ -260,6 +296,7 @@ body {
         flex-direction: column;
         width: 100%;
     }
+
     
     .btn-group .btn {
         margin-bottom: 0.5rem;

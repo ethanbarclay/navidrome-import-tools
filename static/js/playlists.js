@@ -13,6 +13,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Track current MB file for Lidarr
     let currentMBFile = null;
+    // Id of the scan this page started; completions from another tab or from a
+    // superseded scan carry a different one and are ignored.
+    let pendingScanId = null;
 
     // Load user playlists on page load
     loadUserPlaylists();
@@ -20,6 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Listen for MB scan complete event
     if (window.spotifyApp && window.spotifyApp.socket) {
         window.spotifyApp.socket.on('mb_scan_complete', (data) => {
+            if (!pendingScanId || data.scan_id !== pendingScanId) {
+                return;
+            }
+            pendingScanId = null;
+
             window.spotifyApp.hideProgress();
             currentMBFile = data.mb_file;
 
@@ -45,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset MB state when new playlist is fetched
         window.spotifyApp.socket.on('playlist_fetched', () => {
             currentMBFile = null;
+            pendingScanId = null;
             if (sendToLidarrBtn) {
                 sendToLidarrBtn.disabled = true;
             }
@@ -223,14 +232,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Scan MusicBrainz albums
     async function scanMBAlbums() {
-        await window.spotifyApp.runAction('/api/scan-mb-albums', {
+        const scanId = window.spotifyApp.newOperationId();
+        pendingScanId = scanId;
+
+        const started = await window.spotifyApp.runAction('/api/scan-mb-albums', {
             title: 'Scanning MusicBrainz',
             body: {
                 temp_file: window.spotifyApp.currentTempFile,
-                playlist_name: window.spotifyApp.currentPlaylistName || 'playlist'
+                playlist_name: window.spotifyApp.currentPlaylistName || 'playlist',
+                scan_id: scanId
             },
             errorLabel: 'scan MusicBrainz'
         });
+
+        if (!started && pendingScanId === scanId) {
+            pendingScanId = null;
+        }
     }
 
     // Send to Lidarr

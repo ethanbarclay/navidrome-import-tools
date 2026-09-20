@@ -5,13 +5,69 @@ document.addEventListener('DOMContentLoaded', () => {
     const generateM3UBtn = document.getElementById('generate-m3u-liked');
     const sendToNavidromeBtn = document.getElementById('send-to-navidrome-liked');
     const sendToLidarrBtn = document.getElementById('send-to-lidarr-liked');
+    const scanMBAlbumsBtn = document.getElementById('scan-mb-albums-liked');
+    const mbScanStatus = document.getElementById('mb-scan-status-liked');
+    const mbScanMessage = document.getElementById('mb-scan-message-liked');
     const splitPlaylistsBtn = document.getElementById('split-playlists');
     const confirmSplitBtn = document.getElementById('confirm-split');
     const confirmSplitFinalBtn = document.getElementById('confirm-split-final');
     const splitSettingsDiv = document.getElementById('split-settings');
 
+    // Track the scanned MusicBrainz file; Lidarr consumes it, not the raw
+    // liked-songs export, so it stays null until a scan completes.
+    let currentMBFile = null;
+    // Id of the scan this page started; completions from another tab or from a
+    // superseded scan carry a different one and are ignored.
+    let pendingScanId = null;
+
     // Load the total liked-songs count on page mount
     loadLikedSongsCount();
+
+    if (window.spotifyApp && window.spotifyApp.socket) {
+        window.spotifyApp.socket.on('mb_scan_complete', (data) => {
+            if (!pendingScanId || data.scan_id !== pendingScanId) {
+                return;
+            }
+            pendingScanId = null;
+
+            window.spotifyApp.hideProgress();
+            currentMBFile = data.mb_file;
+
+            if (sendToLidarrBtn) {
+                sendToLidarrBtn.disabled = false;
+            }
+
+            if (mbScanStatus && mbScanMessage) {
+                mbScanStatus.style.display = 'block';
+                mbScanMessage.innerHTML = `<span class="text-success"><i class="fas fa-check-circle me-1"></i>${data.found} albums found</span>, <span class="text-warning">${data.failed} failed</span>`;
+            }
+
+            window.spotifyApp.showSuccess(data.message);
+        });
+
+        window.spotifyApp.socket.on('split_complete', (data) => {
+            window.spotifyApp.hideProgress();
+            window.spotifyApp.showSuccess(
+                `Successfully created ${data.playlist_count} playlists with your liked songs!`
+            );
+
+            if (splitSettingsDiv) {
+                splitSettingsDiv.style.display = 'none';
+            }
+        });
+
+        // A fresh fetch invalidates the previous scan's album file.
+        window.spotifyApp.socket.on('liked_songs_fetched', () => {
+            currentMBFile = null;
+            pendingScanId = null;
+            if (sendToLidarrBtn) {
+                sendToLidarrBtn.disabled = true;
+            }
+            if (mbScanStatus) {
+                mbScanStatus.style.display = 'none';
+            }
+        });
+    }
 
     // Handle fetch liked songs
     if (fetchLikedBtn) {
@@ -70,10 +126,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Handle MusicBrainz scan
+    if (scanMBAlbumsBtn) {
+        scanMBAlbumsBtn.addEventListener('click', async () => {
+            if (!window.spotifyApp.requireTempFile('Please fetch your liked songs first')) {
+                return;
+            }
+
+            await scanMBAlbums();
+        });
+    }
+
     // Handle Lidarr submission
     if (sendToLidarrBtn) {
         sendToLidarrBtn.addEventListener('click', async () => {
-            if (!window.spotifyApp.requireTempFile('Please fetch your liked songs first')) {
+            if (!currentMBFile) {
+                window.spotifyApp.showError('Please scan MusicBrainz albums first');
                 return;
             }
 
@@ -142,11 +210,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Scan MusicBrainz albums
+    async function scanMBAlbums() {
+        const scanId = window.spotifyApp.newOperationId();
+        pendingScanId = scanId;
+
+        const started = await window.spotifyApp.runAction('/api/scan-mb-albums', {
+            title: 'Scanning MusicBrainz',
+            body: {
+                temp_file: window.spotifyApp.currentTempFile,
+                playlist_name: 'liked_songs',
+                scan_id: scanId
+            },
+            errorLabel: 'scan MusicBrainz'
+        });
+
+        if (!started && pendingScanId === scanId) {
+            pendingScanId = null;
+        }
+    }
+
     // Send to Lidarr
     async function sendToLidarr() {
         await window.spotifyApp.runAction('/api/send-to-lidarr', {
             title: 'Sending to Lidarr',
-            body: { temp_file: window.spotifyApp.currentTempFile },
+            body: { mb_file: currentMBFile },
             errorLabel: 'send to Lidarr'
         });
     }
@@ -259,20 +347,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-// Add split functionality to the main app
-if (window.spotifyApp) {
-    // Add socket handler for split completion
-    window.spotifyApp.socket.on('split_complete', (data) => {
-        window.spotifyApp.hideProgress();
-        window.spotifyApp.showSuccess(
-            `Successfully created ${data.playlist_count} playlists with your liked songs!`
-        );
-        
-        // Hide split settings after successful split
-        const splitSettingsDiv = document.getElementById('split-settings');
-        if (splitSettingsDiv) {
-            splitSettingsDiv.style.display = 'none';
-        }
-    });
-}

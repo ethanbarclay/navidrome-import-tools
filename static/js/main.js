@@ -182,6 +182,17 @@ class SpotifyMigrationApp {
         }
     }
 
+    // Correlation id for a background job. Socket rooms are per session, not
+    // per tab, so a result can reach a page that didn't start the job; the
+    // page sends this along and ignores completions that don't match.
+    // crypto.randomUUID needs a secure context, which a LAN http:// host isn't.
+    newOperationId() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
     // Guard an action on a previously-fetched temp file; shows an error if missing.
     requireTempFile(message = 'Please fetch data first') {
         if (!this.currentTempFile) {

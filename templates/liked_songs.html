@@ -42,24 +42,47 @@
             <div class="card-body">
                 <div id="liked-songs-info"></div>
                 
-                <div class="mt-3">
-                    <h6>Export Options:</h6>
-                    <div class="btn-group" role="group">
-                        <button type="button" class="btn btn-outline-secondary" id="download-json-liked">
-                            <i class="fas fa-file-code me-1"></i>Download JSON
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" id="generate-m3u-liked">
-                            <i class="fas fa-file-audio me-1"></i>Generate M3U
-                        </button>
-                        <button type="button" class="btn btn-outline-success" id="send-to-navidrome-liked">
-                            <i class="fas fa-list-music me-1"></i>Send to Navidrome
-                        </button>
-                        <button type="button" class="btn btn-outline-success" id="send-to-lidarr-liked">
-                            <i class="fas fa-server me-1"></i>Send to Lidarr
-                        </button>
-                        <button type="button" class="btn btn-outline-warning" id="split-playlists">
-                            <i class="fas fa-cut me-1"></i>Split into Playlists
-                        </button>
+                <div class="mt-4 action-sections">
+                    <div class="action-section">
+                        <span class="action-label">Export files</span>
+                        <div class="action-row">
+                            <button type="button" class="btn btn-outline-secondary" id="download-json-liked">
+                                <i class="fas fa-file-code me-2"></i>Download JSON
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" id="generate-m3u-liked">
+                                <i class="fas fa-file-audio me-2"></i>Generate M3U
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="action-section">
+                        <span class="action-label">Send to your library</span>
+                        <div class="action-row">
+                            <button type="button" class="btn btn-outline-success" id="send-to-navidrome-liked">
+                                <i class="fas fa-list-music me-2"></i>Send to Navidrome
+                            </button>
+                            <button type="button" class="btn btn-outline-info" id="scan-mb-albums-liked">
+                                <i class="fas fa-compact-disc me-2"></i>Scan MB Albums
+                            </button>
+                            <button type="button" class="btn btn-outline-success" id="send-to-lidarr-liked" disabled>
+                                <i class="fas fa-server me-2"></i>Send to Lidarr
+                            </button>
+                        </div>
+                        <div id="mb-scan-status-liked" class="action-status" style="display: none;">
+                            <small class="text-muted">
+                                <i class="fas fa-info-circle me-1"></i>
+                                <span id="mb-scan-message-liked"></span>
+                            </small>
+                        </div>
+                    </div>
+
+                    <div class="action-section">
+                        <span class="action-label">Organize</span>
+                        <div class="action-row">
+                            <button type="button" class="btn btn-outline-warning" id="split-playlists">
+                                <i class="fas fa-cut me-2"></i>Split into Playlists
+                            </button>
+                        </div>
                     </div>
                 </div>
 
