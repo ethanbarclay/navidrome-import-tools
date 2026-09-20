@@ -54,12 +54,21 @@
                         <button type="button" class="btn btn-outline-success" id="send-to-navidrome-liked">
                             <i class="fas fa-list-music me-1"></i>Send to Navidrome
                         </button>
-                        <button type="button" class="btn btn-outline-success" id="send-to-lidarr-liked">
+                        <button type="button" class="btn btn-outline-info" id="scan-mb-albums-liked">
+                            <i class="fas fa-compact-disc me-1"></i>Scan MB Albums
+                        </button>
+                        <button type="button" class="btn btn-outline-success" id="send-to-lidarr-liked" disabled>
                             <i class="fas fa-server me-1"></i>Send to Lidarr
                         </button>
                         <button type="button" class="btn btn-outline-warning" id="split-playlists">
                             <i class="fas fa-cut me-1"></i>Split into Playlists
                         </button>
+                    </div>
+                    <div id="mb-scan-status-liked" class="mt-2" style="display: none;">
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle me-1"></i>
+                            <span id="mb-scan-message-liked"></span>
+                        </small>
                     </div>
                 </div>
 
