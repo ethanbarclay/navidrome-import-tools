@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -123,6 +124,27 @@ def save_settings(settings):
     """Save settings to JSON file"""
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=2)
+
+
+MB_ALBUMS_SUFFIX = "_mb_albums.json"
+MB_FAILED_SUFFIX = "_mb_failed.json"
+
+
+def mb_scan_filename(playlist_name, scope, suffix):
+    """Build a per-session MusicBrainz output filename.
+
+    The scope keeps concurrent scans apart: the liked-songs page always scans
+    under the same playlist_name, so without it every session would read and
+    write one shared file and a second scan could hand the first user's Lidarr
+    import the wrong albums.
+    """
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", playlist_name.replace(" ", "_"))
+    return f"{safe_name}__{scope}{suffix}"
+
+
+def owns_mb_file(mb_file, scope):
+    """True if mb_file was produced by this session's own scan."""
+    return bool(scope) and mb_file.endswith(f"__{scope}{MB_ALBUMS_SUFFIX}")
 
 
 def get_spotify_oauth():
@@ -940,6 +962,8 @@ def scan_mb_albums():
         return jsonify({"error": "Invalid temp file"}), 400
 
     room = session.get("session_id")
+    if not room:
+        return jsonify({"error": "No active session. Please sign in again."}), 401
 
     def notify(event, data):
         socketio.emit(event, data, to=room)
@@ -1011,10 +1035,13 @@ def scan_mb_albums():
 
                 time.sleep(1.1)  # MusicBrainz rate limit
 
-            # Save results to OUTPUT_DIR
-            safe_name = playlist_name.replace(" ", "_")
-            mb_output_file = os.path.join(OUTPUT_DIR, f"{safe_name}_mb_albums.json")
-            failed_output_file = os.path.join(OUTPUT_DIR, f"{safe_name}_mb_failed.json")
+            # Save results to OUTPUT_DIR, scoped to the requesting session
+            mb_output_file = os.path.join(
+                OUTPUT_DIR, mb_scan_filename(playlist_name, room, MB_ALBUMS_SUFFIX)
+            )
+            failed_output_file = os.path.join(
+                OUTPUT_DIR, mb_scan_filename(playlist_name, room, MB_FAILED_SUFFIX)
+            )
 
             with open(mb_output_file, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)
@@ -1061,11 +1088,18 @@ def send_to_lidarr():
             {"error": "No MusicBrainz file specified. Run Scan MB Albums first."}
         ), 400
 
+    # Ignore any directory component, then confirm the scan belongs to this
+    # session so one user can't send another's albums to Lidarr.
+    mb_file = os.path.basename(mb_file)
+    room = session.get("session_id")
+    if not owns_mb_file(mb_file, room):
+        return jsonify(
+            {"error": "That MusicBrainz scan isn't from this session. Re-run Scan MB Albums."}
+        ), 403
+
     mb_file_path = os.path.join(OUTPUT_DIR, mb_file)
     if not os.path.exists(mb_file_path):
         return jsonify({"error": f"MusicBrainz file not found: {mb_file}"}), 400
-
-    room = session.get("session_id")
 
     def notify(event, data):
         socketio.emit(event, data, to=room)
